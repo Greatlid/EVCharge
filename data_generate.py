@@ -64,6 +64,12 @@ def generate_ev_data(no_of_records):
         else:
             plug_expected_times.append(int(round(generate_random_value(20, 1))))
 
+    #loaction where charging needs emerge and destination
+    loc_at_arrival = []
+    loc_at_destination = []
+    for i in range(no_of_records):
+        loc_at_arrival.append(np.random.randint(0,N_node))
+        loc_at_destination.append(np.random.randint(0,N_node))
 
     # Required SoC at plug-out time is assumed be 90% of the total capacity to avoid premature aging
     # 6) SoC of EVs departure
@@ -103,10 +109,10 @@ def generate_ev_data(no_of_records):
     mywriter = csv.writer(csv_out)
     # Write the header
     mywriter.writerow(["Maximum power", "Plug-in time", "Plug-out time",  "Plug-expected time","SOC at arrival", "SOC at departure",
-                       "Battery capacity", "Charging efficiency"])
+                       "Battery capacity", "Charging efficiency", "loc_at_arrival", "loc_at_destination"])
     # Write all rows at once
     rows = zip(ev_id, maximum_power, plug_in_times, plug_out_times, plug_expected_times,soc_at_arrival, soc_at_departure, capacities,
-               efficiencies)
+               efficiencies, loc_at_arrival, loc_at_destination)
     mywriter.writerows(rows)
     # Close the file
     csv_out.close()

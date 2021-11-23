@@ -15,3 +15,6 @@ price_ub = 1.5
 price_lb = 0.5
 price_mean = 1
 Y = 5
+N_node = 45
+charge_station_index = [t-1 for t in [7, 12, 33, 36]]
+v_car = 20

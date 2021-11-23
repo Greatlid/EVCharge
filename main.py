@@ -31,8 +31,15 @@ class OffLineModel():
         self.efficiency = np.array(self.df_ev['Charging efficiency'])
         #Charging time
         self.t_charge = np.ceil(self.power_req/self.p_max).astype(np.int)
+        #location at arrival
+        self.loc_at_arrival = np.array(self.df_ev['loc_at_arrival'])
+        #destination
+        self.loc_at_destination = np.array(self.df_ev['loc_at_destination'])
         #price adjustment constant
         self.Y = Y
+        #node distance matrix
+        self.dist = np.loadtxt('./data/dist.txt')
+        self.timeMatrix = self.dist/v_car
         # Check feasibility of charging
         for n in range(N_EV):
             if (self.t_plug_out[n] - self.t_plug_in[n]) < (self.power_req[n] / self.p_max[n]):
@@ -41,18 +48,6 @@ class OffLineModel():
     def calculate_price_signal(self, base_load, ev_load):
         """ Calculate the price signal based on updated charging schedules of EVs.
         Price during time t is modeled as a function of total demand during time t
-        Keyword arguments:
-            base_load : Non-EV load
-            charging_schedule : Updated charging schedules of EVs
-        Returns:
-            new_price : Control signal (price) for next iteration
-        Price function:
-            U = x²/2
-            U' = x
-            B (beta) = 1
-            Y (gamma) = 1/(NB) = 1/N
-            p(t) = Y * ( base_load(t) + Σ charging_schedule ) ; n = 1,...,N   t=1,...,T
-            p(t) = (1/N)( base_load(t) + Σ charging_schedule )
         """
 
         # Calculate total demand at time t (Base load + EV-load)
@@ -85,12 +80,12 @@ class OffLineModel():
         # Return price signal
         return new_price
 
-    def calculate_charging_schedule_noneOpt(self, worktime_charge_station, t_charge,plug_in_time, plug_out_time, plug_expected_time):
+    def calculate_charging_schedule_noneOpt(self, worktime_charge_station, t_charge,plug_in_time, plug_out_time, plug_expected_time, loc_at_arrival):
         queue_time = np.min(worktime_charge_station, axis=1)
         cost_min = np.inf
         for i in range(plug_in_time, plug_out_time-t_charge+1):
             for j in range(N_ChargeStation):
-                cost = (i - plug_expected_time)**2
+                cost = (i - plug_expected_time)**2+self.timeMatrix[loc_at_arrival,j]
                 if cost < cost_min and queue_time[j, i]+t_charge <= plug_out_time and queue_time[j, i+t_charge-1] <= 0.001:
                     cost_min = cost
                     choice_time = i
@@ -105,24 +100,8 @@ class OffLineModel():
         return choice_time, worktime_charge_station, wait_time_previous
 
     def calculate_charging_schedule(self, price, worktime_charge_station, t_charge, plug_in_time,
-                                plug_out_time, previous_schedule):
+                                plug_out_time, previous_schedule, loc_at_arrival):
         """ Calculate the optimal charging schedule for an EV using Quadratic Optimization.
-        Keyword arguments:
-            price : Electricity price
-            maximum_charging_rate : Maximum allowable charging rate of the EV
-            power_req : Total amount of power required by the EV
-            plug_in_time : Plug-in time of EV
-            plug_out_time : Plug-out time of EV
-            previous_schedule : Charging profile of earlier (n)th iteration
-        Returns:
-            new_schedule : Charging profile of (n+1)th iteration (Updated charging rates during each time slot)
-        Optimization:
-            At nth iteration,
-            Find x(n+1) that,
-                Minimize  Σ(Charging cost + penalty term) for t=1,....,number_of_time_slots
-                Minimize  Σ {<p(t), (new_schedule)> + 1/2(new_schedule - previous_schedule)²}
-        Assumptions:
-            All EVs are available for negotiation at the beginning of scheduling period
         """
 
         cost_min = np.inf
@@ -130,12 +109,9 @@ class OffLineModel():
         cost_all = []
         for i in range(plug_in_time, plug_out_time-t_charge+1):
             for j in range(N_ChargeStation):
-                # new_schedule = np.zeros_like(previous_schedule)
-                # new_schedule[j, i:i + t_charge] = 1
-                # cost = sum(price[j, i:i+t_charge])*MaxPower + queue_time[j, i]*Time_Value \
-                #        + self.Y*np.sqrt(np.sum((new_schedule-previous_schedule)**2))
-                cost = sum(price[j, i:i+t_charge])*MaxPower + queue_time[j, i]*Time_Value \
-                       + self.Y*np.sqrt(np.sum((i-previous_schedule)**2))
+                cost = sum(price[j, i:i+t_charge])*MaxPower + \
+                       (queue_time[j, i]+self.timeMatrix[loc_at_arrival,j]) *Time_Value + \
+                       self.Y*np.sqrt(np.sum((i-previous_schedule)**2))
                 if cost < cost_min and queue_time[j, i]+t_charge <= plug_out_time and queue_time[j, i+t_charge-1] <= 0.001:
                     cost_min = cost
                     choice_time = i
@@ -211,7 +187,7 @@ class OffLineModel():
             # print('For EV ', n)
             _, worktime_charge_station, user_queue_time[n] = self.calculate_charging_schedule_noneOpt \
                 (worktime_charge_station, self.t_charge[n], self.t_plug_in[n], self.t_plug_out[n],
-                 charging_schedules[n])
+                 charging_schedules[n], self.loc_at_arrival[n])
         self.cs_load_base = np.sum(worktime_charge_station > 0, axis=1) * MaxPower
         self.ev_load_base = np.sum(worktime_charge_station > 0, axis=(0, 1)) * MaxPower
         self.aggregate_load_base = self.base_load + self.ev_load_base
@@ -253,7 +229,8 @@ class OffLineModel():
                 # Uncomment:
                 # print('For EV ', n)
                 new_charging_schedules[n], worktime_charge_station, user_queue_time[n] = self.calculate_charging_schedule\
-                    (price, worktime_charge_station, self.t_charge[n], self.t_plug_in[n], self.t_plug_out[n], charging_schedules[n])
+                    (price, worktime_charge_station, self.t_charge[n], self.t_plug_in[n], self.t_plug_out[n], charging_schedules[n],
+                     self.loc_at_arrival[n])
 
                 # Stopping criterion
                 # sqrt{(p(k) - p(k-1))²} <= 0.001, for t=1,...,T
