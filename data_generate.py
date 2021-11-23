@@ -50,11 +50,11 @@ def generate_ev_data(no_of_records):
     # 3) Plug-in times of EVs
     plug_in_times = []
     for i in range(no_of_records):
-        plug_in_times.append(int(round(generate_random_value(5, 2))))
+        plug_in_times.append(int(round(generate_random_value(1, 1))))
     # 4) Plug-out times of EVs
     plug_out_times = []
     for i in range(no_of_records):
-        plug_out_times.append(int(round(generate_random_value(19, 2))))
+        plug_out_times.append(min(int(round(generate_random_value(23, 1))), TIME_HORIZON))
 
     # Required SoC at plug-out time is assumed be 90% of the total capacity to avoid premature aging
     # 6) SoC of EVs departure
