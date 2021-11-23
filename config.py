@@ -18,3 +18,5 @@ Y = 5
 N_node = 45
 charge_station_index = [t-1 for t in [7, 12, 33, 36]]
 v_car = 20
+weight_time = 0.5
+weight_cs = 0.5

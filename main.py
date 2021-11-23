@@ -61,8 +61,12 @@ class OffLineModel():
         #define price variable
         new_price = V(shape=(N_ChargeStation, TIME_HORIZON))
         # Define Objective function
-        objective = MIN(SS(MUL(new_price, load)-MUL(new_price, load)/(N_ChargeStation*TIME_HORIZON)))
-
+        # objective = MIN(SS(MUL(new_price, load)-MUL(new_price, load)/(N_ChargeStation*TIME_HORIZON)))
+        objective = 0
+        for i in range(TIME_HORIZON):
+            objective += ((SM(new_price[:,i] @ load[:,i])-SM(MUL(new_price, load))/(N_ChargeStation*TIME_HORIZON))**2)*weight_time
+            objective += SM((new_price[:,i] @ load[:,i] - SM(new_price[:,i] @ load[:,i])/N_ChargeStation)**2)*weight_cs
+        objective = MIN(objective)
         # Define constraints list
         constraints = []
         constraints.append(new_price <= price_ub)
@@ -169,13 +173,14 @@ class OffLineModel():
                     '4', '5', '6', '7', '8', '9', '10', '11'))
         plt.legend(loc='best')
         plt.title('price')
-        plt.show()
+
 
         plt.figure()
         for i in range(len(self.iteration_res)):
-            plt.plot(self.iteration_res[i][2], label = 'ite:'+str(i))
+            plt.plot(self.iteration_res[i][2], label = 'iter:'+str(i))
         plt.legend()
         plt.title('iteration result')
+        plt.show()
 
     def SolveNoneOptimal(self):
         charging_schedules = self.t_plug_expected
@@ -198,7 +203,8 @@ class OffLineModel():
 
     def Solve(self):
         self.SolveNoneOptimal()
-        print('none opt cost:', self.cost_base)
+
+        print("none opt PEAK: ", self.peak_base, 'kW', 'none opt cost:',self.cost_base)
         charging_schedules = self.t_plug_expected  #charge start time
         previous_price = np.zeros(shape=(N_ChargeStation, TIME_HORIZON))
         previous_ev_load = self.ev_load_base
@@ -251,6 +257,7 @@ class OffLineModel():
             iteration_res.append([previous_cs_load, previous_ev_load, previous_aggregate_load,
                                   peak, cost, revenue, user_queue_time])
             print("PEAK: ", peak, 'kW', 'cost:',cost, 'revenue:', revenue, 'profit:', revenue-cost)
+
 
             if np.all(stop) or k > MaxIteration:
                 # plt.plot(price[0,:])
