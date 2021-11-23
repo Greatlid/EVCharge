@@ -104,7 +104,7 @@ class OffLineModel():
         return choice_time, worktime_charge_station, wait_time_previous
 
     def calculate_charging_schedule(self, price, worktime_charge_station, t_charge, plug_in_time,
-                                plug_out_time, previous_schedule, loc_at_arrival):
+                                plug_out_time, previous_schedule, loc_at_arrival, plug_expected_time):
         """ Calculate the optimal charging schedule for an EV using Quadratic Optimization.
         """
 
@@ -115,7 +115,7 @@ class OffLineModel():
             for j in range(N_ChargeStation):
                 cost = sum(price[j, i:i+t_charge])*MaxPower + \
                        (queue_time[j, i]+self.timeMatrix[loc_at_arrival,j]) *Time_Value + \
-                       self.Y*np.sqrt(np.sum((i-previous_schedule)**2))
+                       self.Y*np.sqrt(np.sum((i-previous_schedule)**2)) + alpha * np.sqrt(np.sum((i-plug_expected_time)**2))
                 if cost < cost_min and queue_time[j, i]+t_charge <= plug_out_time and queue_time[j, i+t_charge-1] <= 0.001:
                     cost_min = cost
                     choice_time = i
@@ -236,7 +236,7 @@ class OffLineModel():
                 # print('For EV ', n)
                 new_charging_schedules[n], worktime_charge_station, user_queue_time[n] = self.calculate_charging_schedule\
                     (price, worktime_charge_station, self.t_charge[n], self.t_plug_in[n], self.t_plug_out[n], charging_schedules[n],
-                     self.loc_at_arrival[n])
+                     self.loc_at_arrival[n], self.t_plug_expected[n])
 
                 # Stopping criterion
                 # sqrt{(p(k) - p(k-1))²} <= 0.001, for t=1,...,T
