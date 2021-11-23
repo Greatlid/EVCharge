@@ -1,7 +1,7 @@
 import scipy.stats as sp
 import csv
 from config import *
-
+import numpy as np
 def generate_random_value(mean, standard_deviation):
     """ Generate a random value in a normal distribution.
     Keyword arguments:
@@ -56,6 +56,15 @@ def generate_ev_data(no_of_records):
     for i in range(no_of_records):
         plug_out_times.append(min(int(round(generate_random_value(23, 1))), TIME_HORIZON))
 
+    #expected charging time
+    plug_expected_times = []
+    for i in range(no_of_records):
+        if np.random.rand(1) <= 0.5:
+            plug_expected_times.append(int(round(generate_random_value(7, 1))))
+        else:
+            plug_expected_times.append(int(round(generate_random_value(20, 1))))
+
+
     # Required SoC at plug-out time is assumed be 90% of the total capacity to avoid premature aging
     # 6) SoC of EVs departure
     soc_at_departure = [1] * no_of_records
@@ -93,10 +102,10 @@ def generate_ev_data(no_of_records):
     # Create the csv writer object
     mywriter = csv.writer(csv_out)
     # Write the header
-    mywriter.writerow(["Maximum power", "Plug-in time", "Plug-out time", "SOC at arrival", "SOC at departure",
+    mywriter.writerow(["Maximum power", "Plug-in time", "Plug-out time",  "Plug-expected time","SOC at arrival", "SOC at departure",
                        "Battery capacity", "Charging efficiency"])
     # Write all rows at once
-    rows = zip(ev_id, maximum_power, plug_in_times, plug_out_times, soc_at_arrival, soc_at_departure, capacities,
+    rows = zip(ev_id, maximum_power, plug_in_times, plug_out_times, plug_expected_times,soc_at_arrival, soc_at_departure, capacities,
                efficiencies)
     mywriter.writerows(rows)
     # Close the file

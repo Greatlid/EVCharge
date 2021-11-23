@@ -25,12 +25,14 @@ class OffLineModel():
         self.t_plug_in = np.array(self.df_ev['Plug-in time'].astype(int))
         # Plug-out time of EVs
         self.t_plug_out = np.array(self.df_ev['Plug-out time'].astype(int))
+        #plug-expeced time of EVs
+        self.t_plug_expected = np.array(self.df_ev['Plug-expected time'].astype(int))
         # Charging efficiency of EVs
         self.efficiency = np.array(self.df_ev['Charging efficiency'])
         #Charging time
         self.t_charge = np.ceil(self.power_req/self.p_max).astype(np.int)
         #price adjustment constant
-        self.Y = 20
+        self.Y = Y
         # Check feasibility of charging
         for n in range(N_EV):
             if (self.t_plug_out[n] - self.t_plug_in[n]) < (self.power_req[n] / self.p_max[n]):
@@ -54,12 +56,13 @@ class OffLineModel():
         """
 
         # Calculate total demand at time t (Base load + EV-load)
-        total_load = base_load[:TIME_HORIZON] + ev_load
-
+        # total_load = base_load[:TIME_HORIZON] + ev_load
+        total_load =ev_load
         # Calculate price signal
-
+        # total_load_eachTime = np.sum(total_load, axis=0)
         load =(price_ub-price_lb) * (total_load-np.min(total_load))/(np.max(total_load)-np.min(total_load)) + price_lb
         load = 1/load
+
         #define price variable
         new_price = V(shape=(N_ChargeStation, TIME_HORIZON))
         # Define Objective function
@@ -78,11 +81,28 @@ class OffLineModel():
 
         # Solution
         new_price = np.array((new_price.value).tolist())
-        # price = self.Y * (total_load)
-        # if ev_load[0][0] > 0: price = self.Y * (ev_load)
 
         # Return price signal
         return new_price
+
+    def calculate_charging_schedule_noneOpt(self, worktime_charge_station, t_charge,plug_in_time, plug_out_time, plug_expected_time):
+        queue_time = np.min(worktime_charge_station, axis=1)
+        cost_min = np.inf
+        for i in range(plug_in_time, plug_out_time-t_charge+1):
+            for j in range(N_ChargeStation):
+                cost = (i - plug_expected_time)**2
+                if cost < cost_min and queue_time[j, i]+t_charge <= plug_out_time and queue_time[j, i+t_charge-1] <= 0.001:
+                    cost_min = cost
+                    choice_time = i
+                    choice_station = j
+                    choice_station_unit = np.argmin(worktime_charge_station[choice_station, :, choice_time])
+
+        wait_time_previous = worktime_charge_station[choice_station, choice_station_unit, choice_time]
+        worktime_charge_station[choice_station, choice_station_unit, choice_time] += t_charge
+        wait_time_new = worktime_charge_station[choice_station, choice_station_unit, choice_time]
+        worktime_charge_station[choice_station, choice_station_unit, choice_time:choice_time + wait_time_new] = \
+            np.arange(wait_time_new, max(choice_time + wait_time_new - TIME_HORIZON, 0), step=-1)
+        return choice_time, worktime_charge_station, wait_time_previous
 
     def calculate_charging_schedule(self, price, worktime_charge_station, t_charge, plug_in_time,
                                 plug_out_time, previous_schedule):
@@ -110,27 +130,26 @@ class OffLineModel():
         cost_all = []
         for i in range(plug_in_time, plug_out_time-t_charge+1):
             for j in range(N_ChargeStation):
-                new_schedule = np.zeros_like(previous_schedule)
-                new_schedule[j, i:i + t_charge] = 1
-                cost = sum(price[j, i:i+t_charge])*MaxPower + queue_time[j, i]*Time_Value \
-                       + self.Y*np.sqrt(np.sum((new_schedule-previous_schedule)**2))
+                # new_schedule = np.zeros_like(previous_schedule)
+                # new_schedule[j, i:i + t_charge] = 1
                 # cost = sum(price[j, i:i+t_charge])*MaxPower + queue_time[j, i]*Time_Value \
                 #        + self.Y*np.sqrt(np.sum((new_schedule-previous_schedule)**2))
-                if cost < cost_min and queue_time[j, i]+t_charge < plug_out_time:
+                cost = sum(price[j, i:i+t_charge])*MaxPower + queue_time[j, i]*Time_Value \
+                       + self.Y*np.sqrt(np.sum((i-previous_schedule)**2))
+                if cost < cost_min and queue_time[j, i]+t_charge <= plug_out_time and queue_time[j, i+t_charge-1] <= 0.001:
                     cost_min = cost
                     choice_time = i
                     choice_station = j
                     choice_station_unit = np.argmin(worktime_charge_station[choice_station, :, choice_time])
-            cost_all.append([sum(price[j, i:i+t_charge])*MaxPower, queue_time[j, i]*Time_Value, self.Y*np.sqrt(np.sum((new_schedule-previous_schedule)**2))])
+            cost_all.append([previous_schedule, cost, sum(price[j, i:i+t_charge])*MaxPower, queue_time[j, i]*Time_Value, self.Y*np.sqrt(np.sum((i-previous_schedule)**2))])
         #update schedual
-        new_schedule[choice_station, choice_time:choice_time+t_charge] = 1
         #update wait time
         wait_time_previous = worktime_charge_station[choice_station, choice_station_unit, choice_time]
         worktime_charge_station[choice_station, choice_station_unit, choice_time] += t_charge
         wait_time_new = worktime_charge_station[choice_station, choice_station_unit, choice_time]
         worktime_charge_station[choice_station, choice_station_unit, choice_time:choice_time+wait_time_new] = \
             np.arange(wait_time_new, max(choice_time+wait_time_new-TIME_HORIZON, 0), step = -1)
-        return new_schedule, worktime_charge_station, wait_time_previous
+        return choice_time, worktime_charge_station, wait_time_previous
 
     def ComputeCost(self, ev_load):
         res = 0
@@ -144,9 +163,20 @@ class OffLineModel():
 
     def ShowResult(self):
         plt.figure()
+        plt.subplot(2,1,1)
         #[np.argsort(self.timeline)]
         plt.plot(np.arange(0, TIME_HORIZON, 1), self.aggregate_load, label='Aggregate load')
         plt.plot(np.arange(0, TIME_HORIZON, 1), self.base_load, label='Initial load')
+        plt.plot(np.arange(0, TIME_HORIZON, 1), self.aggregate_load_base, label='Aggregate load baseline')
+        plt.grid()
+        plt.xticks(np.arange(24),
+                   ('12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', '23', '0', '1', '2', '3',
+                    '4', '5', '6', '7', '8', '9', '10', '11'))
+        plt.legend(loc='best')
+        plt.title('power load')
+
+        plt.subplot(2, 1, 2)
+        plt.plot(np.arange(0, TIME_HORIZON, 1), self.ev_load_base, label='ev load baseline')
         plt.plot(np.arange(0, TIME_HORIZON, 1), self.ev_load, label='ev load')
         plt.grid()
         plt.xticks(np.arange(24),
@@ -154,25 +184,56 @@ class OffLineModel():
                     '4', '5', '6', '7', '8', '9', '10', '11'))
         plt.legend(loc='best')
 
+
         plt.figure()
         for i in range(N_ChargeStation):
-            plt.plot(np.arange(0, TIME_HORIZON, 1), self.price[i,:])
+            plt.plot(np.arange(0, TIME_HORIZON, 1), self.price[i,:], label ='price:'+str(i))
         plt.xticks(np.arange(24),
                    ('12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', '23', '0', '1', '2', '3',
                     '4', '5', '6', '7', '8', '9', '10', '11'))
         plt.legend(loc='best')
+        plt.title('price')
         plt.show()
 
+        plt.figure()
+        for i in range(len(self.iteration_res)):
+            plt.plot(self.iteration_res[i][2], label = 'ite:'+str(i))
+        plt.legend()
+        plt.title('iteration result')
+
+    def SolveNoneOptimal(self):
+        charging_schedules = self.t_plug_expected
+        worktime_charge_station = np.zeros(shape=(N_ChargeStation, N_ChargeUnit, TIME_HORIZON), dtype=np.int)
+        # user wait time
+        user_queue_time = np.zeros(shape=(N_EV,))
+        for n in range(N_EV):
+            # Uncomment:
+            # print('For EV ', n)
+            _, worktime_charge_station, user_queue_time[n] = self.calculate_charging_schedule_noneOpt \
+                (worktime_charge_station, self.t_charge[n], self.t_plug_in[n], self.t_plug_out[n],
+                 charging_schedules[n])
+        self.cs_load_base = np.sum(worktime_charge_station > 0, axis=1) * MaxPower
+        self.ev_load_base = np.sum(worktime_charge_station > 0, axis=(0, 1)) * MaxPower
+        self.aggregate_load_base = self.base_load + self.ev_load_base
+        self.peak_base = np.amax(self.aggregate_load_base)
+        self.cost_base = self.ComputeCost(self.ev_load_base)
+
+
+
     def Solve(self):
-        charging_schedules = np.zeros(shape=(N_EV, N_ChargeStation, TIME_HORIZON))  #charge start time
+        self.SolveNoneOptimal()
+        print('none opt cost:', self.cost_base)
+        charging_schedules = self.t_plug_expected  #charge start time
         previous_price = np.zeros(shape=(N_ChargeStation, TIME_HORIZON))
-        previous_ev_load = np.zeros_like(self.base_load)
-        previous_cs_load = np.zeros(shape=(N_ChargeStation, TIME_HORIZON))
+        previous_ev_load = self.ev_load_base
+        previous_cs_load = np.zeros(shape=(N_ChargeStation, TIME_HORIZON))+previous_ev_load
         k = 0
+        iteration_res = []
         while True:
             # Uncomment:
             print('\nIteration ', k)
             print('----------------------------------------')
+            # Step i
             # charge station work time
             worktime_charge_station = np.zeros(shape=(N_ChargeStation, N_ChargeUnit, TIME_HORIZON), dtype = np.int)
             # user wait time
@@ -185,7 +246,7 @@ class OffLineModel():
             # Step iii
             # Each EV locally calculates a new charging profile by  solving the optimization problem
             # and reports new charging profile to utility
-            new_charging_schedules = np.zeros(shape=(N_EV, N_ChargeStation, TIME_HORIZON))
+            new_charging_schedules = np.zeros(shape=(N_EV, ))
             # Stop values of all EVs should be true to terminate the algorithm
             stop = np.ones(N_EV, dtype=bool)
             for n in range(N_EV):
@@ -210,6 +271,8 @@ class OffLineModel():
             peak = np.amax(previous_aggregate_load)
             cost = self.ComputeCost(previous_ev_load)
             revenue = self.ComputeRevenue(price, previous_cs_load)
+            iteration_res.append([previous_cs_load, previous_ev_load, previous_aggregate_load,
+                                  peak, cost, revenue, user_queue_time])
             print("PEAK: ", peak, 'kW', 'cost:',cost, 'revenue:', revenue, 'profit:', revenue-cost)
 
             if np.all(stop) or k > MaxIteration:
@@ -217,6 +280,7 @@ class OffLineModel():
                 self.ev_load = previous_ev_load
                 self.aggregate_load = previous_aggregate_load
                 self.price = price
+                self.iteration_res = iteration_res
                 break
             else:
                 # Step iV
@@ -226,12 +290,9 @@ class OffLineModel():
                 k += 1
 
 
-        # Remove negative 0 values from output
-        charging_schedules[charging_schedules < 0] = 0
-
 
 def Main():
-    np.random.seed(1234)
+    np.random.seed(2021)
     generate_ev_data(N_EV)
     model = OffLineModel()
     model.Solve()
